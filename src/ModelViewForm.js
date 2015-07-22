@@ -86,9 +86,34 @@ function update_options( $select, opts )
     return $select;
 }
 
-function ajax_dependent_select( $selects, model )
+function update_suggestions( $el, opts )
 {
-    var model_prefix = model.id + '.', 
+    opts = opts || [];
+    var $datalist = $('#'+$el.attr('list')), 
+        i, l, o, k, v,
+        options = '';
+    for (i=0,l=opts.length; i<l; i++)
+    {
+        o = opts[ i ];
+        if ( is_obj( o ) )
+        {
+            //k = KEYS( o )[ 0 ]; v = o[ k ];
+            k = o.key; v = o.value;
+        }
+        else
+        {
+            k = o; v = o;
+        }
+        options += '<option value="' + k + '">' + v + '</option>';
+    }
+    $datalist.html( options );
+    return $el;
+}
+
+function ajax_dependent_select( $selects, mvform )
+{
+    var model = mvform.$view.$model, 
+        model_prefix = model.id + '.', 
         selects_exist = false, 
         dependent_selects = { };
         
@@ -106,6 +131,7 @@ function ajax_dependent_select( $selects, model )
         ajax_options = $select.attr(mvattr( 'ajax-options' ));
         ajax_model_key = $select.attr(mvattr( 'key' )); 
         ajax_key = $select.attr(mvattr( 'ajax-key' ));
+        if ( !ajax_key ) ajax_key = ajax_model_key;
         if ( !ajax_key || !ajax_model_key || ! ajax_options ) return;
         
         dependent_selects[ ajax_model_key ] = {
@@ -126,17 +152,105 @@ function ajax_dependent_select( $selects, model )
                 select = dependent_selects[ data.key ];
                 request = {}; request[ select.key ] = model.get( select.model_key );
                 select.$el.addClass('mvform-progress');
+                mvform.trigger( 'before-ajax-options', select );
                 ModelViewForm.doGET(select.options, request, function( success, response ){
                     update_options( select.$el, response || [] )
                         .removeClass('mvform-progress')
                         .trigger('change');
+                    mvform.trigger( 'after-ajax-options', select );
                 });
             }
         });
         // trigger updates first time
-        //model.notify( KEYS(dependent_selects), 'change' );
+        model.notify( KEYS(dependent_selects), 'change' );
     }
-    return KEYS(dependent_selects);
+}
+
+function ajax_suggest( $els, mvform )
+{
+    var model = mvform.$view.$model, 
+        model_prefix = model.id + '.',
+        ajax_suggets = { }, suggests_exist = false,
+        min_chars = 2, suggest_cache = { }, 
+        cache_expires = 60000, typing_timeout = 200;
+        
+    $els.each(function( ){
+        var $el = $(this), name = $el.attr('name'), key,
+            ajax_key, ajax_suggest, suggestlist, min_chars = 2
+        ;
+        
+        if ( !name ) return;
+        
+        key = dotted( name );
+        if ( model_prefix !== key.slice(0, model_prefix.length) ) return;
+        key = key.slice( model_prefix.length );
+        
+        ajax_suggest = $el.attr(mvattr( 'ajax-suggest' ));
+        ajax_key = $el.attr(mvattr( 'ajax-key' ));
+        if ( !ajax_key ) ajax_key = key;
+        suggestlist = uuid('suggestlist');
+        $el.after('<datalist id="'+suggestlist+'"></datalist>');
+        $el.attr('list', suggestlist);
+        
+        ajax_suggets[ name ] = {
+            key: key,
+            ajax_key: ajax_key,
+            suggest: ajax_suggest,
+            stop_typing: 0,
+            suggesting: false,
+            $el: $el
+        };
+        suggest_cache[ key ] = { };
+        suggests_exist = true;
+    });
+    
+    if ( suggests_exist )
+    {
+        mvform.$form.on('keypress', 'input['+mvattr( 'ajax-suggest' )+']', function( evt ){
+            var input = this, el;
+            if ( !!input.name && ajax_suggets[HAS]( input.name ) )
+            {
+                el = ajax_suggets[ input.name ];
+                el.stop_typing = new Date( ).getTime( ) + typing_timeout;
+                setTimeout(function( ) {
+                    var request, suggestions, cached, v, t = new Date( ).getTime( );
+                    // still typing
+                    if ( el.stop_typing > t ) return;
+                    v = trim( input.value||'' );
+                    if ( v.length < min_chars ) return;
+                
+                    suggestions = null;
+                    cached = suggest_cache[ el.key ];
+                    if ( cached[HAS]( v ) )
+                    {
+                        if ( cached[ v ].expires < t ) suggestions = cached[ v ].suggestions;
+                        else delete cached[ v ];
+                    }
+                    
+                    if ( null !== suggestions )
+                    {
+                        update_suggestions( el.$el, suggestions );
+                    }
+                    else
+                    {
+                        if ( el.suggesting ) return;
+                        el.suggesting = true;
+                        request = {}; request[ el.ajax_key ] = v;
+                        el.$el.addClass('mvform-progress');
+                        mvform.trigger( 'before-ajax-suggest', el );
+                        ModelViewForm.doGET(el.suggest, request, function( success, response ){
+                            el.suggesting = false;
+                            suggestions = response || [];
+                            cached[ v ] = { expires: new Date( ).getTime( )+cache_expires, suggestions: suggestions };
+                            update_suggestions( el.$el, suggestions )
+                                .removeClass('mvform-progress');
+                            mvform.trigger( 'after-ajax-suggest', el );
+                        });
+                    }
+                }, typing_timeout+100);
+            }
+        });
+    }
 }
 
 function fields2model( $elements, dataModel, locale )
@@ -392,7 +506,6 @@ ModelViewForm = window.ModelViewForm = function ModelViewForm( options ) {
     var self = this;
     if ( !(self instanceof ModelViewForm) ) return new ModelViewForm( options );
     self.id = uuid('mvform');
-    self.$pb = $({});
     self.$options = $.extend({
         submit: true,
         notify: true,
@@ -404,42 +517,35 @@ ModelViewForm = window.ModelViewForm = function ModelViewForm( options ) {
         View: ModelViewForm.View,
         ajax: false
     }, options || { });
+    self.initPubSub( );
 };
 ModelViewForm.VERSION = "0.6"; 
 ModelViewForm.Model = Model;
 ModelViewForm.View = View;
-ModelViewForm.doGET = function( url, data, cb ) {
-    var handler = function( res, textStatus ) {
-            if ( 'success' == textStatus ) cb( true, res );
-            else cb( false, res );
+ModelViewForm.doSubmit = function( submitMethod, responseType ) {
+    responseType = responseType || 'json';
+    return function( url, data, cb ) {
+        var handler = function( res, textStatus ) {
+                if ( 'success' == textStatus ) cb( true, res );
+                else cb( false, res );
+        };
+        $.ajax({
+            type: submitMethod,
+            dataType: responseType,
+            url: url,
+            data: data || null,
+            success: handler, error: handler
+        });
     };
-    $.ajax({
-        type: 'GET',
-        dataType: 'json',
-        url: url,
-        data: data || null,
-        success: handler, error: handler
-    });
 };
-ModelViewForm.doPOST = function( url, data, cb ) {
-    var handler = function( res, textStatus ) {
-            if ( 'success' == textStatus ) cb( true, res );
-            else cb( false, res );
-    };
-    $.ajax({
-        type: 'POST',
-        dataType: 'json',
-        url: url,
-        data: data || null,
-        success: handler, error: handler
-    });
-};
+ModelViewForm.doGET = ModelViewForm.doSubmit( 'GET', 'json' );
+ModelViewForm.doPOST = ModelViewForm.doSubmit( 'POST', 'json' );
 ModelViewForm.fields2model = fields2model;
-ModelViewForm[PROTO] = {
+
+ModelViewForm[PROTO] = ModelView.Extend( Extend( Object[PROTO] ), ModelView.PublishSubscribeInterface, {
     constructor: ModelViewForm,
     
     id: null,
-    $pb: null,
     $form: null,
     $view: null,
     $messages: null,
@@ -447,8 +553,7 @@ ModelViewForm[PROTO] = {
     
     dispose: function( ) {
         var self = this;
-        self.$pb.off( );
-        self.$pb = null;
+        self.disposePubSub( );
         if ( self.$form /*&& self.$form.length*/ )
         {
             self.$form.off('submit.'+self.id);
@@ -464,40 +569,25 @@ ModelViewForm[PROTO] = {
     },
     
     trigger: function( evt, data, delay ) {
-        var self = this, params = { };
+        var self = this, 
+            $super = ModelView.PublishSubscribeInterface.trigger
+        ;
         delay = delay || 0;
-        params.data = data || null;
-        params.mvform = self;
         if ( delay > 0 )
         {
             setTimeout(function( ){
-                self.$pb.trigger( evt, params );
+                $super.call( self, evt, data );
             }, delay);
         }
         else
         {
-            self.$pb.trigger( evt, params );
+            $super.call( self, evt, data );
         }
         return self;
     },
     
-    on: function( evt, handler ) {
-        var self = this;
-        self.$pb.on( evt, handler );
-        return self;
-    },
-    
     one: function( evt, handler ) {
-        var self = this;
-        self.$pb.one( evt, handler );
-        return self;
-    },
-    
-    off: function( evt ) {
-        var self = this;
-        if ( arguments.length > 1 ) self.$pb.off( evt, arguments[1] );
-        else if ( evt ) self.$pb.off( evt );
-        return self;
+        return this.on( evt, handler, true );
     },
     
     dom: function( el ) {
@@ -571,9 +661,7 @@ ModelViewForm[PROTO] = {
                 getters: { }, 
                 setters: { },
                 dependencies: { }
-            },
-            
-            dependent_selects
+            }
         ;
         
         $form.addClass('mvform').attr('id', $form[0].id || uuid('mvform'));
@@ -589,7 +677,7 @@ ModelViewForm[PROTO] = {
         
         // form modelview
         $form.modelview({
-            autoSync: false,
+            autoSync: true,
             autobind: true,
             livebind: options.livebind,
             isomorphic: false,
@@ -602,7 +690,8 @@ ModelViewForm[PROTO] = {
         });
         self.$view = $form.modelview('view');
         
-        dependent_selects = ajax_dependent_select( $form.find('select['+mvattr( 'ajax-options' )+']'), self.$view.$model );
+        ajax_suggest( $form.find('input['+mvattr( 'ajax-suggest' )+']'), self );
+        ajax_dependent_select( $form.find('select['+mvattr( 'ajax-options' )+']'), self );
         
         if ( options.submit )
         {
@@ -642,15 +731,10 @@ ModelViewForm[PROTO] = {
             });
         }
         
-        $form.modelview('sync');
-        if ( dependent_selects.length )
-            // trigger updates first time
-            self.$view.$model.notify( dependent_selects, 'change' );
-        
         self.trigger('after-render');
         
         return self;
     }
-};
+});
 
 }(window, jQuery, ModelView);
