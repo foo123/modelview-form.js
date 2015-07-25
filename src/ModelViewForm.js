@@ -15,7 +15,7 @@
 // auxilliaries
 var Extend = Object.create, PROTO = 'prototype', HAS = 'hasOwnProperty', 
     UPPER = 'toUpperCase', LOWER = 'toLowerCase', KEYS = Object.keys,
-    toJSON = JSON.stringify, toString = Object[PROTO].toString,
+    toJSON = JSON.stringify, fromJSON = JSON.parse, toString = Object[PROTO].toString,
     is_obj = function( o ){ return o instanceof Object || '[object Object]' === toString.call(o); },
     empty_brackets_re = /\[\s*\]$/, trim_re = /^\s+|\s+$/g, numeric_re = /^\d+$/,
     index_to_prop_re = /\[([^\]]*)\]/g, trailing_dots_re = /^\.+|\.+$/g,
@@ -61,8 +61,27 @@ function item_not_empty( o, i )
 function update_options( $select, opts )
 {
     opts = opts || [];
-    var selected = $select.val( ), i, l, o, k, v,
+    var selected, i, l, o, k, v,
         options = '', $group;
+    
+    // initial selections, before ajax options were loaded, stored in data- attributes
+    if ( !!(selected=$select.attr( mvattr( 'selected-multiple' ) )) )
+    {
+        $select.removeAttr( mvattr( 'selected-multiple' ) );
+        selected = selected.split(',');
+    }
+    else if ( !!(selected=$select.attr( mvattr( 'selected' ) )) )
+    {
+        $select.removeAttr( mvattr( 'selected' ) );
+    }
+    else
+    {
+        selected = $select.val( );
+    }
+    
+    //$select.removeAttr( mvattr( 'selected' ) );
+    //$select.removeAttr( mvattr( 'selected-multiple' ) );
+    
     for (i=0,l=opts.length; i<l; i++)
     {
         o = opts[ i ];
