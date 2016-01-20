@@ -2,36 +2,64 @@
 *
 *   ModelViewForm.js
 *   Declarative MV Form building, rendering, validation 
-*   @dependencies: jQuery, ModelView
-*   @version: 0.6
+*   @dependencies: jQuery, DateX, ModelView
+*   @version: 0.9.0
 *
 *   https://github.com/foo123/modelview.js
 *   https://github.com/foo123/modelview-form.js
 *
 **/
-!function( window, $, ModelView, undef ) {
+!function( window, $, DateX, ModelView, Xpresion, undef ) {
 "use strict";
 
 // auxilliaries
 var Extend = Object.create, PROTO = 'prototype', HAS = 'hasOwnProperty', 
     UPPER = 'toUpperCase', LOWER = 'toLowerCase', KEYS = Object.keys,
+    ATTR = 'getAttribute', SET_ATTR = 'setAttribute', HAS_ATTR = 'hasAttribute', DEL_ATTR = 'removeAttribute',
     toJSON = JSON.stringify, fromJSON = JSON.parse, toString = Object[PROTO].toString,
-    is_obj = function( o ){ return o instanceof Object || '[object Object]' === toString.call(o); },
-    empty_brackets_re = /\[\s*\]$/, trim_re = /^\s+|\s+$/g, numeric_re = /^\d+$/,
-    index_to_prop_re = /\[([^\]]*)\]/g, trailing_dots_re = /^\.+|\.+$/g,
+    is_obj = function( o ){ return '[object Object]' === toString.call(o); },
+    is_array = function( o ) { return '[object Array]' === toString.call(o); },
+    trim_re = /^\s+|\s+$/g,
     trim = String[PROTO].trim 
             ? function( s ){ return s.trim( ); } 
             : function( s ){ return s.replace(trim_re, ''); },
+    numeric_re = /^\d+$/, index_to_prop_re = /\[([^\]]*)\]/g, dynamic_array_re = /\[\s*\]$/,
+    leading_dots_re = /^\.+/g, trailing_dots_re = /^\.+|\.+$/g,
+    dotted = function( key ) {
+        //        convert indexes to properties     strip trailing dots
+        return key.replace(index_to_prop_re, '.$1').replace(trailing_dots_re, '');
+    },
+    dotted2 = function( key ) {
+        //        convert indexes to properties     strip leading dots
+        return key.replace(index_to_prop_re, '.$1').replace(leading_dots_re, '');
+    },
+    escaped_re = /[\-\[\]\/\{\}\(\)\*\+\?\.\\\^\$\|]/g, 
+    esc_re = function( s ) { return s.replace(escaped_re, "\\$&"); },
+    RE = function( re, fl ) { return new RegExp(re, fl||''); },
     uuid = ModelView.UUID, 
     TypeCast = ModelView.Type.Cast, 
     Validate = ModelView.Validation.Validate,
     Model = ModelView.Model, View, ModelViewForm
 ;
 
-function dotted( key ) 
+
+if ( !Validate[HAS]('DATETIME') )
 {
-    //          convert indexes to properties   strip leading/trailing dots
-    return key.replace(index_to_prop_re, '.$1').replace(trailing_dots_re, '');
+    Validate['DATETIME']  = function( format, locale ){
+        if ( 'function' === typeof DateX )
+        {
+            var date_parse = DateX.getParser( format, locale || DateX.defaultLocale );
+            return ModelView.Validation.Validator(function( datetime ) {
+                return !!datetime && false !== date_parse( datetime );
+            });
+        }
+        else
+        {
+            return ModelView.Validation.Validator(function( datetime ) {
+                return true;
+            });
+        }
+    };
 }
 
 function mvattr( key )
@@ -49,7 +77,7 @@ function get_value( c, i )
     var alternative;
     return c.checked
         ? c.value
-        : (!!(alternative=c.getAttribute('data-else')) ? alternative : '')
+        : (!!(alternative=c[ATTR]('data-else')) ? alternative : '')
     ;
 }
 
@@ -99,34 +127,10 @@ function update_options( $select, opts )
     $group = $select.children('optgroup');
     $group = $group.length ? $group.eq( 0 ) : $select;
     //$group.empty( );
-    $group.children('option:not(.default)').remove( );
+    $group.children('option:not(.default,.placeholder)').remove( );
     $group.append( options );
     $select.val( selected ); // select the appropriate option
     return $select;
-}
-
-function update_suggestions( $el, opts )
-{
-    opts = opts || [];
-    var $datalist = $('#'+$el.attr('list')), 
-        i, l, o, k, v,
-        options = '';
-    for (i=0,l=opts.length; i<l; i++)
-    {
-        o = opts[ i ];
-        if ( is_obj( o ) )
-        {
-            //k = KEYS( o )[ 0 ]; v = o[ k ];
-            k = o.key; v = o.value;
-        }
-        else
-        {
-            k = o; v = o;
-        }
-        options += '<option value="' + k + '">' + v + '</option>';
-    }
-    $datalist.html( options );
-    return $el;
 }
 
 function ajax_dependent_select( $selects, mvform )
@@ -185,99 +189,58 @@ function ajax_dependent_select( $selects, mvform )
     }
 }
 
-function ajax_suggest( $els, mvform )
+function key_getter( at_key, prefix )
 {
-    var model = mvform.$view.$model, 
-        model_prefix = model.id + '.',
-        ajax_suggets = { }, suggests_exist = false,
-        min_chars = 2, suggest_cache = { }, 
-        cache_expires = 60000, typing_timeout = 200;
-        
-    $els.each(function( ){
-        var $el = $(this), name = $el.attr('name'), key,
-            ajax_key, ajax_suggest, suggestlist, min_chars = 2
-        ;
-        
-        if ( !name ) return;
-        
-        key = dotted( name );
-        if ( model_prefix !== key.slice(0, model_prefix.length) ) return;
-        key = key.slice( model_prefix.length );
-        
-        ajax_suggest = $el.attr(mvattr( 'ajax-suggest' ));
-        ajax_key = $el.attr(mvattr( 'ajax-key' ));
-        if ( !ajax_key ) ajax_key = key;
-        suggestlist = uuid('suggestlist');
-        $el.after('<datalist id="'+suggestlist+'"></datalist>');
-        $el.attr('list', suggestlist);
-        
-        ajax_suggets[ name ] = {
-            key: key,
-            ajax_key: ajax_key,
-            suggest: ajax_suggest,
-            stop_typing: 0,
-            suggesting: false,
-            $el: $el
-        };
-        suggest_cache[ key ] = { };
-        suggests_exist = true;
-    });
-    
-    if ( suggests_exist )
+    if ( "function" === typeof at_key ) return at_key;
+    else if ( !!prefix )
     {
-        mvform.$form.on('keypress', 'input['+mvattr( 'ajax-suggest' )+']', function( evt ){
-            var input = this, el;
-            if ( !!input.name && ajax_suggets[HAS]( input.name ) )
-            {
-                el = ajax_suggets[ input.name ];
-                el.stop_typing = new Date( ).getTime( ) + typing_timeout;
-                setTimeout(function( ) {
-                    var request, suggestions, cached, v, t = new Date( ).getTime( );
-                    // still typing
-                    if ( el.stop_typing > t ) return;
-                    v = trim( input.value||'' );
-                    if ( v.length < min_chars ) return;
-                
-                    suggestions = null;
-                    cached = suggest_cache[ el.key ];
-                    if ( cached[HAS]( v ) )
-                    {
-                        if ( cached[ v ].expires < t ) suggestions = cached[ v ].suggestions;
-                        else delete cached[ v ];
-                    }
-                    
-                    if ( null !== suggestions )
-                    {
-                        update_suggestions( el.$el, suggestions );
-                    }
-                    else
-                    {
-                        if ( el.suggesting ) return;
-                        el.suggesting = true;
-                        request = {}; request[ el.ajax_key ] = v;
-                        el.$el.addClass('mvform-progress');
-                        mvform.trigger( 'before-ajax-suggest', el );
-                        ModelViewForm.doGET(el.suggest, request, function( success, response ){
-                            el.suggesting = false;
-                            suggestions = response || [];
-                            cached[ v ] = { expires: new Date( ).getTime( )+cache_expires, suggestions: suggestions };
-                            update_suggestions( el.$el, suggestions )
-                                .removeClass('mvform-progress');
-                            mvform.trigger( 'after-ajax-suggest', el );
-                        });
-                    }
-                }, typing_timeout+100);
-            }
-        });
+        // strict mode (after prefix, a key follows)
+        var regex = RE( '^' + esc_re( prefix ) + '([\\.\\[].+)$' );
+        return function( el ) { 
+            var m, key = el[ATTR]( at_key );
+            return !!key && (m=key.match(regex)) ? m[1] : null;
+        };
+    }
+    else
+    {
+        return function( el ) {
+            return el[ATTR]( at_key );
+        };
     }
 }
 
-function fields2model( $elements, dataModel, locale )
+function value_getter( at_value, strict )
 {
-    var model_prefix = dataModel.id + '.', checkboxes_done = { };
-    $elements.each(function( ){
-        var $el = $(this), name = $el.attr('name'), key,
-            k, i, o, val, nval,
+    return "function" === typeof at_value
+        ? at_value
+        : (false !== strict
+        ? function( el ) {
+            var value = ('value' === at_value ? $(el).val() : el[ATTR]( at_value )) || '',
+                type = (el[ATTR]('type')||el.tagName||'').toLowerCase( );
+            
+            // empty, non-selected, non-checked element, bypass
+            return ( (('checkbox' === type || 'radio' === type) && !el.checked) ||
+                ('select' === type && (!value.length || -1 === el.selectedIndex)) ||
+                (('text' === type || 'textarea' === type ) && !trim(value).length)
+            ) ? undef : value;
+        }
+        : function( el ) {
+            var value = ('value' === at_value ? $(el).val() : el[ATTR]( at_value )) || '',
+                type = (el[ATTR]('type')||el.tagName).toLowerCase( );
+            return (('checkbox' === type || 'radio' === type) && !el.checked) ? undef : value;
+        });
+}
+
+function fields2model( $elements, model, locale, $key, $value/*, $json_encoded*/, arrays_as_objects )
+{
+    $key = key_getter( $key || 'name', model.id );
+    $value = value_getter( $value || 'value', false );
+    //if ( arguments.length < 6 ) $json_encoded = false;
+    arrays_as_objects = true === arrays_as_objects;
+    for(var e=0,len=$elements.length; e<len; e++)
+    {
+        var el = $elements[e], $el = $(el),
+            name, value, key, key2, k, i, o, val, nval,
             validator, type, input_type, 
             required, data_required, required_validator,
             checkbox_type, is_dynamic_array = false, 
@@ -285,23 +248,38 @@ function fields2model( $elements, dataModel, locale )
             checkboxes, params
         ;
         
-        if ( !name || checkboxes_done[name] ) return;
-        key = dotted( name );
-        if ( model_prefix !== key.slice(0, model_prefix.length) ) return;
-        key = key.slice( model_prefix.length );
-        
-        val = $el.val() || ''; nval = '';
-        input_type = ($el.attr('type')||'')[LOWER]( );
+        name = $key( el ); if ( !name ) continue;
+        is_dynamic_array = dynamic_array_re.test( name );
+        input_type = (el[ATTR]('type')||'')[LOWER]( );
         checkbox_type = ('radio' === input_type) || ('checkbox' === input_type);
-        required = !!$el.attr('required');
-        data_required = !!$el.attr(mvattr( 'required' ));
-        alternative = $el.attr('data-else');
-        has_alternative = !!alternative;
-        is_dynamic_array = ('checkbox' === input_type) && empty_brackets_re.test( name );
+        has_alternative = el[HAS_ATTR]('data-else');
+        alternative = has_alternative ? el[ATTR]('data-else') : null;
+        value = $value( el );
+        if ( null == value )
+        {
+            if ( !is_dynamic_array && 'checkbox' === input_type && !el.checked && has_alternative )
+            {
+                // pass
+                value = null;
+            }
+            else
+            {
+                continue;
+            }
+        }
+        /*if ( json_encoded )
+        {
+            if ( !!value ) value = fromJSON( value );
+            else value = null;
+        }*/
+        k = dotted2( name ); key = k.replace(trailing_dots_re, '');
+        val = value || ''; nval = '';
+        required = !!el[ATTR]('required');
+        data_required = !!el[ATTR](mvattr( 'required' ));
         
-        if ( !$el.attr("id") ) $el.attr( "id", uuid(key.split('.').join('_')) );
+        if ( !el[HAS_ATTR]("id") ) el[ATTR]( "id", uuid(key.split('.').join('_')) );
         
-        if ( !!(type = $el.attr(mvattr( 'type' )) || input_type) ) 
+        if ( !!(type = el[ATTR](mvattr( 'type' )) || input_type) ) 
         {
             type = type[UPPER]( );
             switch( type )
@@ -309,38 +287,35 @@ function fields2model( $elements, dataModel, locale )
                 case "NUMBER": 
                 case "INTEGER": 
                 case "INT": 
-                    dataModel.types[ key ] = TypeCast.INT; 
+                    model.types[ key ] = TypeCast.INT; 
                     val = TypeCast.INT( val ) || 0; nval = 0;
                     if ( checkbox_type && !is_dynamic_array && has_alternative ) 
                         nval = TypeCast.INT( alternative ) || 0;
                     break;
                 
-                case "DATE": 
-                case "TIME": 
-                case "DATETIME": 
-                case "EMAIL": 
-                case "URL": 
-                case "TEXT": 
-                case "STRING": 
-                case "STR": 
-                    dataModel.types[ key ] = TypeCast.STR; 
-                    val = TypeCast.STR( val ) || ''; nval = '';
-                    if ( checkbox_type && !is_dynamic_array && has_alternative ) 
-                        nval = TypeCast.STR( alternative ) || '';
-                    break;
-                
                 case "BOOLEAN": 
                 case "BOOL": 
-                    dataModel.types[ key ] = TypeCast.BOOL; 
+                    model.types[ key ] = TypeCast.BOOL; 
                     val = TypeCast.BOOL( val ) || false; nval = !val;
                     if ( checkbox_type && !is_dynamic_array && has_alternative ) 
                         nval = TypeCast.BOOL( alternative );
                     break;
                 
+                case "EMAIL": 
+                case "URL": 
+                case "TEXT": 
+                case "STRING": 
+                case "STR": 
+                    model.types[ key ] = TypeCast.STR; 
+                    val = TypeCast.STR( val ) || ''; nval = '';
+                    if ( checkbox_type && !is_dynamic_array && has_alternative ) 
+                        nval = TypeCast.STR( alternative ) || '';
+                    break;
+                
                 default: 
                     if ( TypeCast[HAS](type) ) 
                     {
-                        dataModel.types[ key ] = TypeCast[ type ];
+                        model.types[ key ] = TypeCast[ type ];
                         //val = TypeCast[ type ]( val );
                         if ( checkbox_type && !is_dynamic_array && has_alternative ) 
                             nval = TypeCast[ type ]( alternative );
@@ -350,157 +325,145 @@ function fields2model( $elements, dataModel, locale )
         
         if ( !is_dynamic_array )
         {
-            if ( !!(validator = $el.attr(mvattr( 'validate' ))) || required || data_required ||
+            if ( !!(validator = el[ATTR](mvattr( 'validate' ))) || required || data_required ||
                 ('email'===input_type || 'url'===input_type || 
                 'datetime' === input_type || 'date' === input_type || 'time' === input_type)
             ) 
             {
-                if ( validator && Validate[HAS](validator=validator[UPPER]()) )
+                if ( !!validator /*&& Validate[HAS](validator=validator[UPPER]())*/ )
                 {
+                    validator = validator[UPPER]();
+                    
                     if ( 'BETWEEN' === validator )
                     {
-                        params = [parseInt($el.attr(mvattr( 'min' )),10), parseInt($el.attr(mvattr( 'max' )),10)];
+                        params = [parseInt(el[ATTR](mvattr( 'min' )),10), parseInt(el[ATTR](mvattr( 'max' )),10)];
                         if ( !isNaN(params[0]) && !isNaN(params[1]) )
                         {
-                            dataModel.validators[ key ] = dataModel.validators[HAS]( key )
-                                ? dataModel.validators[ key ].AND( Validate.BETWEEN(params[0], params[1], false) )
+                            model.validators[ key ] = model.validators[HAS]( key )
+                                ? model.validators[ key ].AND( Validate.BETWEEN(params[0], params[1], false) )
                                 : Validate.BETWEEN(params[0], params[1], false)
                             ;
                         }
                     }
                     else if ( 'GREATER_THAN' === validator )
                     {
-                        params = parseInt($el.attr(mvattr( 'min' )),10);
+                        params = parseInt(el[ATTR](mvattr( 'min' )),10);
                         if ( !isNaN(params) )
                         {
-                            dataModel.validators[ key ] = dataModel.validators[HAS]( key )
-                                ? dataModel.validators[ key ].AND( Validate.GREATER_THAN(params, true) )
+                            model.validators[ key ] = model.validators[HAS]( key )
+                                ? model.validators[ key ].AND( Validate.GREATER_THAN(params, true) )
                                 : Validate.GREATER_THAN(params, true)
                             ;
                         }
                     }
                     else if ( 'LESS_THAN' === validator )
                     {
-                        params = parseInt($el.attr(mvattr( 'max' )),10);
+                        params = parseInt(el[ATTR](mvattr( 'max' )),10);
                         if ( !isNaN(params) )
                         {
-                            dataModel.validators[ key ] = dataModel.validators[HAS]( key )
-                                ? dataModel.validators[ key ].AND( Validate.LESS_THAN(params, true) )
+                            model.validators[ key ] = model.validators[HAS]( key )
+                                ? model.validators[ key ].AND( Validate.LESS_THAN(params, true) )
                                 : Validate.LESS_THAN(params, true)
                             ;
                         }
                     }
                     else if ( 'DATETIME' === validator || 'DATE' === validator || 'TIME' === validator )
                     {
-                        params = $el.attr(mvattr( 'format' )) || 'Y-m-d';
-                        dataModel.validators[ key ] = dataModel.validators[HAS]( key )
-                            ? dataModel.validators[ key ].AND( Validate.DATETIME(params, locale&&locale.datetime ? locale.datetime : null) )
+                        params = el[ATTR](mvattr( 'format' )) || 'Y-m-d H:i:s';
+                        model.validators[ key ] = model.validators[HAS]( key )
+                            ? model.validators[ key ].AND( Validate.DATETIME(params, locale&&locale.datetime ? locale.datetime : null) )
                             : Validate.DATETIME(params, locale&&locale.datetime ? locale.datetime : null)
                         ;
                     }
-                    else
+                    else if ( Validate[HAS](validator) )
                     {
-                        dataModel.validators[ key ] = dataModel.validators[HAS]( key )
-                            ? dataModel.validators[ key ].AND( Validate[ validator ] )
+                        model.validators[ key ] = model.validators[HAS]( key )
+                            ? model.validators[ key ].AND( Validate[ validator ] )
                             : Validate[ validator ]
                         ;
                     }
                 }
                 else if ( 'email' === input_type )
                 {
-                    dataModel.validators[ key ] = dataModel.validators[HAS]( key )
-                        ? dataModel.validators[ key ].AND( Validate.EMAIL )
+                    model.validators[ key ] = model.validators[HAS]( key )
+                        ? model.validators[ key ].AND( Validate.EMAIL )
                         : Validate.EMAIL
                     ;
                 }
                 else if ( 'url' === input_type )
                 {
-                    dataModel.validators[ key ] = dataModel.validators[HAS]( key )
-                        ? dataModel.validators[ key ].AND( Validate.URL )
+                    model.validators[ key ] = model.validators[HAS]( key )
+                        ? model.validators[ key ].AND( Validate.URL )
                         : Validate.URL
                     ;
                 }
                 else if ( 'datetime' === input_type || 'date' === input_type || 'time' === input_type )
                 {
-                    params = $el.attr(mvattr( 'format' )) || 'Y-m-d';
-                    dataModel.validators[ key ] = dataModel.validators[HAS]( key )
-                        ? dataModel.validators[ key ].AND( Validate.DATETIME(params, locale&&locale.datetime ? locale.datetime : null) )
+                    params = el[ATTR](mvattr( 'format' )) || 'Y-m-d H:i:s';
+                    model.validators[ key ] = model.validators[HAS]( key )
+                        ? model.validators[ key ].AND( Validate.DATETIME(params, locale&&locale.datetime ? locale.datetime : null) )
                         : Validate.DATETIME(params, locale&&locale.datetime ? locale.datetime : null)
                     ;
                 }
-                $el.attr(mvattr( 'bind' ), toJSON({error:"error", change:"change"}));
+                if ( !el[HAS_ATTR](mvattr( 'bind' )) )
+                    el[SET_ATTR](mvattr( 'bind' ), toJSON({error:"error", change:"change"}));
             }
         }
         if ( required || data_required )
         {
             required_validator = is_dynamic_array 
-                ? Validate.MIN_ITEMS( parseInt($el.attr(mvattr( 'leastrequired' )), 10) || 1, item_not_empty )
+                ? Validate.MIN_ITEMS( parseInt(el[ATTR](mvattr( 'leastrequired' )), 10) || 1, item_not_empty )
                 : Validate.NOT_EMPTY
             ;
                 
-            dataModel.validators[ key ] = dataModel.validators[HAS]( key )
-                ? required_validator.AND( dataModel.validators[ key ] )
+            model.validators[ key ] = model.validators[HAS]( key )
+                ? required_validator.AND( model.validators[ key ] )
                 : required_validator
             ;
             
-            dataModel.validators[ key ].REQUIRED = 1;
+            model.validators[ key ].REQUIRED = 1;
             
-            if ( required ) $el.removeAttr( 'required' );
-            if ( !$el.attr(mvattr( 'bind' )) ) $el.attr(mvattr( 'bind' ), toJSON({error:"error", change:"change"}));
+            if ( required ) el[DEL_ATTR]( 'required' );
+            if ( !el[HAS_ATTR](mvattr( 'bind' )) )
+                el[SET_ATTR](mvattr( 'bind' ), toJSON({error:"error", change:"change"}));
         }
         else if ( !is_dynamic_array && 
-            ('function' === typeof dataModel.validators[ key ]) && 
-            !dataModel.validators[ key ].REQUIRED 
+            ('function' === typeof model.validators[ key ]) && 
+            !model.validators[ key ].REQUIRED 
         )
         {
-            dataModel.validators[ key ] = Validate.EMPTY.OR( dataModel.validators[ key ] );
+            model.validators[ key ] = Validate.EMPTY.OR( model.validators[ key ] );
         }
         
-        k = key.split('.'); o = dataModel.data;
+        k = k.split('.'); o = model.data;
         while ( k.length )
         {
             i = k.shift( );
             if ( k.length ) 
             {
-                if ( !o[HAS]( i ) ) o[ i ] = numeric_re.test( k[0] ) ? [ ] : { };
+                if ( !o[HAS]( i ) )
+                {
+                    if ( is_dynamic_array && 1 === k.length ) // dynamic array, ie a[ b ][ c ][ ]
+                        o[ i ] = [ ];
+                    else if ( !arrays_as_objects && numeric_re.test( k[0] ) ) // standard array, ie a[ b ][ c ][ n ]
+                        o[ i ] = new Array( parseInt(k[0], 10)+1 );
+                    else // object, associative array, ie a[ b ][ c ][ k ]
+                        o[ i ] = { };
+                }
+                else if ( !arrays_as_objects && numeric_re.test( k[0] ) && (o[i].length <= (n=parseInt(k[0], 10))) )
+                {
+                    // adjust size if needed to already standard array
+                    o[ i ] = o[ i ].concat( new Array(n-o[i].length+1) );
+                }
                 o = o[ i ];
             }
             else 
             {
-                if ( !o[HAS]( i ) ) o[ i ] = is_dynamic_array ? [ ] : nval; // initialise the field
-                
-                if ( checkbox_type )
-                {
-                    if ( ('radio' === input_type) && $el.prop('checked') ) o[ i ] = val;
-                    else if ( 'checkbox' === input_type ) 
-                    {
-                        checkboxes = $($el[0].form).find('input[type="checkbox"][name="'+name+'"]');
-                        if ( is_dynamic_array )
-                        {
-                            o[ i ] = $.map(checkboxes.filter(is_checked), get_value);
-                        }
-                        else if ( checkboxes.length > 1 )
-                        {
-                            o[ i ] = $.map(checkboxes, get_value);
-                        }
-                        else if ( has_alternative )
-                        {
-                            o[ i ] = $el.prop('checked') ? val : nval;
-                        }
-                        else
-                        {
-                            o[ i ] = $el.prop('checked') ? val : nval;
-                        }
-                        checkboxes_done[name] = 1;
-                    }
-                }
-                else
-                {
-                    o[ i ] = val;
-                }
+                if ( is_dynamic_array ) o.push( val ); // dynamic array, i.e a[ b ][ c ][ ]
+                else o[ i ] = !is_dynamic_array && 'checkbox' === input_type && !el.checked && has_alternative ? nval : val; // i.e a[ b ][ c ][ k ]
             }
         }
-    });
+    }
 }
 
 // Custom Form View based on ModelView.View, implements custom form actions, can be overriden
@@ -538,7 +501,7 @@ ModelViewForm = window.ModelViewForm = function ModelViewForm( options ) {
     }, options || { });
     self.initPubSub( );
 };
-ModelViewForm.VERSION = "0.6"; 
+ModelViewForm.VERSION = "0.9.0"; 
 ModelViewForm.Model = Model;
 ModelViewForm.View = View;
 ModelViewForm.doSubmit = function( submitMethod, responseType ) {
@@ -559,7 +522,9 @@ ModelViewForm.doSubmit = function( submitMethod, responseType ) {
 };
 ModelViewForm.doGET = ModelViewForm.doSubmit( 'GET', 'json' );
 ModelViewForm.doPOST = ModelViewForm.doSubmit( 'POST', 'json' );
-ModelViewForm.fields2model = fields2model;
+ModelViewForm.getKey = key_getter;
+ModelViewForm.getValue = value_getter;
+ModelViewForm.toModel = fields2model;
 
 ModelViewForm[PROTO] = ModelView.Extend( Extend( Object[PROTO] ), ModelView.PublishSubscribeInterface, {
     constructor: ModelViewForm,
@@ -643,20 +608,15 @@ ModelViewForm[PROTO] = ModelView.Extend( Extend( Object[PROTO] ), ModelView.Publ
     },
     
     notify: function( fields ) {
-        var self = this, $form = self.$form, i, prefix, mverr, errors;
+        var self = this, $form = self.$form, mverr;
         if ( $form && $form.length && fields && fields.length )
         {
             self.$view.$model.notify( fields, 'error' );
             if ( self.$messages && self.$messages.length )
             {
-                prefix = self.$options.prefixed 
-                    ? self.$view.$model.id + '.'
-                    : ''
-                ;
-                mverr = mvattr( 'error' ) + '="' + prefix;
-                errors = '[' + mverr + fields.join('"],['+mverr) + '"]';
                 self.$messages.hide( );
-                $form.find( errors ).show( );
+                mverr = mvattr( 'error' ) + '="' + (self.$options.prefixed ? self.$view.$model.id + '.' : '');
+                $form.find( '[' + mverr + fields.join('"],['+mverr) + '"]' ).show( );
             }
         }
         return self;
@@ -698,7 +658,7 @@ ModelViewForm[PROTO] = ModelView.Extend( Extend( Object[PROTO] ), ModelView.Publ
         $form.modelview({
             autoSync: true,
             autobind: true,
-            livebind: options.livebind,
+            livebind: !!options.livebind,
             isomorphic: false,
             autovalidate: false,
             bindAttribute: mvattr( 'bind' ),
@@ -709,7 +669,7 @@ ModelViewForm[PROTO] = ModelView.Extend( Extend( Object[PROTO] ), ModelView.Publ
         });
         self.$view = $form.modelview('view');
         
-        ajax_suggest( $form.find('input['+mvattr( 'ajax-suggest' )+']'), self );
+        //ajax_suggest( $form.find('input['+mvattr( 'ajax-suggest' )+']'), self );
         ajax_dependent_select( $form.find('select['+mvattr( 'ajax-options' )+']'), self );
         
         if ( options.submit )
@@ -756,4 +716,4 @@ ModelViewForm[PROTO] = ModelView.Extend( Extend( Object[PROTO] ), ModelView.Publ
     }
 });
 
-}(window, jQuery, ModelView);
+}(window, jQuery, DateX, ModelView, null);
