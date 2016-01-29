@@ -3,7 +3,7 @@
 *   ModelViewForm.js
 *   Declarative MV Form building, rendering, validation 
 *   @dependencies: jQuery, DateX, ModelView
-*   @version: 0.9.0
+*   @version: 1.0.0
 *
 *   https://github.com/foo123/modelview.js
 *   https://github.com/foo123/modelview-form.js
@@ -14,9 +14,13 @@
 
 // auxilliaries
 var Extend = Object.create, PROTO = 'prototype', HAS = 'hasOwnProperty', 
-    UPPER = 'toUpperCase', LOWER = 'toLowerCase', KEYS = Object.keys,
+    UPPER = 'toUpperCase', LOWER = 'toLowerCase', KEYS = Object.keys, toString = Object[PROTO].toString,
     ATTR = 'getAttribute', SET_ATTR = 'setAttribute', HAS_ATTR = 'hasAttribute', DEL_ATTR = 'removeAttribute',
-    toJSON = JSON.stringify, fromJSON = JSON.parse, toString = Object[PROTO].toString,
+    
+    json_encode = JSON.stringify, json_decode = JSON.parse,
+    base64_decode = atob, base64_encode = btoa,
+    url_encode = encodeURIComponent, url_decode = decodeURIComponent,
+    
     is_obj = function( o ){ return '[object Object]' === toString.call(o); },
     is_array = function( o ) { return '[object Array]' === toString.call(o); },
     trim_re = /^\s+|\s+$/g,
@@ -36,10 +40,8 @@ var Extend = Object.create, PROTO = 'prototype', HAS = 'hasOwnProperty',
     escaped_re = /[\-\[\]\/\{\}\(\)\*\+\?\.\\\^\$\|]/g, 
     esc_re = function( s ) { return s.replace(escaped_re, "\\$&"); },
     RE = function( re, fl ) { return new RegExp(re, fl||''); },
-    uuid = ModelView.UUID, 
-    TypeCast = ModelView.Type.Cast, 
-    Validate = ModelView.Validation.Validate,
-    Model = ModelView.Model, View, ModelViewForm
+    TypeCast = ModelView.Type.Cast, Validate = ModelView.Validation.Validate,
+    uuid = ModelView.UUID, Model = ModelView.Model, View, ModelViewForm
 ;
 
 
@@ -59,6 +61,49 @@ if ( !Validate[HAS]('DATETIME') )
                 return true;
             });
         }
+    };
+}
+
+if ( !Validate[HAS]('MIN_FILES') )
+{
+    Validate['MIN_FILES']  = function( input, m, item_filter ){
+        m = parseInt( m, 10 ) || 0;
+        return ModelView.Validation.Validator('function' === typeof item_filter 
+        ? function( fileList ) {
+            fileList = fileList || input.files;
+            return fileList.length > 0 ? (Array.prototype.filter.call(fileList, item_filter).length >= m) : (0 >= m);
+        }
+        : function( fileList ) {
+            fileList = fileList || input.files;
+            return fileList.length >= m;
+        });
+    };
+}
+
+if ( !Validate[HAS]('MAX_FILES') )
+{
+    Validate['MAX_FILES']  = function( input, M, item_filter ){
+        M = parseInt( M, 10 ) || 0;
+        return ModelView.Validation.Validator('function' === typeof item_filter 
+        ? function( fileList ) {
+            fileList = fileList || input.files;
+            return fileList.length > 0 ? (Array.prototype.filter.call(fileList, item_filter).length <= M) : (0 <= M);
+        }
+        : function( fileList ) {
+            fileList = fileList || input.files;
+            return fileList.length <= M;
+        });
+    };
+}
+
+if ( !Validate[HAS]('FILESIZE') )
+{
+    Validate['FILESIZE']  = function( input, max_size ){
+        max_size = parseInt( max_size, 10 ) || 0;
+        return ModelView.Validation.Validator(function( fileList ) {
+            fileList = fileList || input.files;
+            return (!fileList.length) || (fileList[0].size <= max_size);
+        });
     };
 }
 
@@ -219,15 +264,33 @@ function value_getter( at_value, strict )
                 type = (el[ATTR]('type')||el.tagName||'').toLowerCase( );
             
             // empty, non-selected, non-checked element, bypass
-            return ( (('checkbox' === type || 'radio' === type) && !el.checked) ||
-                ('select' === type && (!value.length || -1 === el.selectedIndex)) ||
-                (('text' === type || 'textarea' === type ) && !trim(value).length)
-            ) ? undef : value;
+            if ( 'file' === type )
+            {
+                // File or Blob object
+                return !el.files.length ? null : el.files;
+            }
+            else
+            {
+                // empty, non-selected, non-checked element, bypass
+                return ( (('checkbox' === type || 'radio' === type) && !el.checked) ||
+                    ('select' === type && (!value.length || -1 === el.selectedIndex)) ||
+                    (('text' === type || 'textarea' === type ) && !trim(value).length)
+                ) ? undef : value;
+            }
         }
         : function( el ) {
             var value = ('value' === at_value ? $(el).val() : el[ATTR]( at_value )) || '',
                 type = (el[ATTR]('type')||el.tagName).toLowerCase( );
-            return (('checkbox' === type || 'radio' === type) && !el.checked) ? undef : value;
+            // empty, non-selected, non-checked element, bypass
+            if ( 'file' === type )
+            {
+                // File or Blob object
+                return !el.files.length ? null : el.files;
+            }
+            else
+            {
+                return (('checkbox' === type || 'radio' === type) && !el.checked) ? undef : value;
+            }
         });
 }
 
@@ -237,13 +300,13 @@ function fields2model( $elements, model, locale, $key, $value/*, $json_encoded*/
     $value = value_getter( $value || 'value', false );
     //if ( arguments.length < 6 ) $json_encoded = false;
     arrays_as_objects = true === arrays_as_objects;
-    for(var e=0,len=$elements.length; e<len; e++)
+    for (var e=0,len=$elements.length; e<len; e++)
     {
         var el = $elements[e], $el = $(el),
             name, value, key, key2, k, i, o, val, nval,
             validator, type, input_type, 
             required, data_required, required_validator,
-            checkbox_type, is_dynamic_array = false, 
+            checkbox_type, file_type, is_dynamic_array = false, 
             alternative, has_alternative,
             checkboxes, params
         ;
@@ -252,12 +315,13 @@ function fields2model( $elements, model, locale, $key, $value/*, $json_encoded*/
         is_dynamic_array = dynamic_array_re.test( name );
         input_type = (el[ATTR]('type')||'')[LOWER]( );
         checkbox_type = ('radio' === input_type) || ('checkbox' === input_type);
+        file_type = 'file' === input_type;
         has_alternative = el[HAS_ATTR]('data-else');
         alternative = has_alternative ? el[ATTR]('data-else') : null;
         value = $value( el );
         if ( null == value )
         {
-            if ( !is_dynamic_array && 'checkbox' === input_type && !el.checked && has_alternative )
+            if ( file_type || (!is_dynamic_array && 'checkbox' === input_type && !el.checked && has_alternative) )
             {
                 // pass
                 value = null;
@@ -269,7 +333,7 @@ function fields2model( $elements, model, locale, $key, $value/*, $json_encoded*/
         }
         /*if ( json_encoded )
         {
-            if ( !!value ) value = fromJSON( value );
+            if ( !!value ) value = json_decode( value );
             else value = null;
         }*/
         k = dotted2( name ); key = k.replace(trailing_dots_re, '');
@@ -375,6 +439,14 @@ function fields2model( $elements, model, locale, $key, $value/*, $json_encoded*/
                             : Validate.DATETIME(params, locale&&locale.datetime ? locale.datetime : null)
                         ;
                     }
+                    else if ( 'FILESIZE' === validator )
+                    {
+                        params = parseInt(el[ATTR](mvattr( 'filesize' )), 10) || 1048576 /*1 MiB*/;
+                        model.validators[ key ] = model.validators[HAS]( key )
+                            ? model.validators[ key ].AND( Validate.FILESIZE(el, params) )
+                            : Validate.FILESIZE(el, params)
+                        ;
+                    }
                     else if ( Validate[HAS](validator) )
                     {
                         model.validators[ key ] = model.validators[HAS]( key )
@@ -406,14 +478,18 @@ function fields2model( $elements, model, locale, $key, $value/*, $json_encoded*/
                     ;
                 }
                 if ( !el[HAS_ATTR](mvattr( 'bind' )) )
-                    el[SET_ATTR](mvattr( 'bind' ), toJSON({error:"error", change:"change"}));
+                    el[SET_ATTR](mvattr( 'bind' ), json_encode({error:"error", change:"change"}));
             }
         }
         if ( required || data_required )
         {
             required_validator = is_dynamic_array 
-                ? Validate.MIN_ITEMS( parseInt(el[ATTR](mvattr( 'leastrequired' )), 10) || 1, item_not_empty )
-                : Validate.NOT_EMPTY
+                ? (file_type
+                ? Validate.MIN_FILES( el, parseInt(el[ATTR](mvattr( 'leastrequired' )), 10) || 1 )
+                : Validate.MIN_ITEMS( parseInt(el[ATTR](mvattr( 'leastrequired' )), 10) || 1, item_not_empty ))
+                : (file_type
+                ? Validate.MIN_FILES( el, 1 )
+                : Validate.NOT_EMPTY)
             ;
                 
             model.validators[ key ] = model.validators[HAS]( key )
@@ -425,7 +501,7 @@ function fields2model( $elements, model, locale, $key, $value/*, $json_encoded*/
             
             if ( required ) el[DEL_ATTR]( 'required' );
             if ( !el[HAS_ATTR](mvattr( 'bind' )) )
-                el[SET_ATTR](mvattr( 'bind' ), toJSON({error:"error", change:"change"}));
+                el[SET_ATTR](mvattr( 'bind' ), json_encode({error:"error", change:"change"}));
         }
         else if ( !is_dynamic_array && 
             ('function' === typeof model.validators[ key ]) && 
@@ -444,11 +520,26 @@ function fields2model( $elements, model, locale, $key, $value/*, $json_encoded*/
                 if ( !o[HAS]( i ) )
                 {
                     if ( is_dynamic_array && 1 === k.length ) // dynamic array, ie a[ b ][ c ][ ]
-                        o[ i ] = [ ];
+                    {
+                        if ( value instanceof FileList /*!!el.type && ('file' === el.type.toLowerCase())*/ )
+                        {
+                            // FileList is already array for file input fields
+                            o[ i ] = val;
+                            break;
+                        }
+                        else
+                        {
+                            o[ i ] = [ ];
+                        }
+                    }
                     else if ( !arrays_as_objects && numeric_re.test( k[0] ) ) // standard array, ie a[ b ][ c ][ n ]
+                    {
                         o[ i ] = new Array( parseInt(k[0], 10)+1 );
+                    }
                     else // object, associative array, ie a[ b ][ c ][ k ]
+                    {
                         o[ i ] = { };
+                    }
                 }
                 else if ( !arrays_as_objects && numeric_re.test( k[0] ) && (o[i].length <= (n=parseInt(k[0], 10))) )
                 {
@@ -464,6 +555,217 @@ function fields2model( $elements, model, locale, $key, $value/*, $json_encoded*/
             }
         }
     }
+}
+
+function datauri2blob( dataURI, mimeType )
+{
+    // convert base64/URLEncoded data component to raw binary data held in a string
+    var byteString, arrayBuffer, dataType, i, i0, n, j, p;
+    if ( 'data:' === dataURI.substr( 0, 5 ) )
+    {
+        if ( -1 < (p=dataUri.indexOf(';base64,')) )
+        {
+            // separate out the mime component
+            dataType = dataUri.slice( 5, p );
+            dataUri = dataUri.slice( p+8 );
+            byteString = base64_decode( dataUri );
+        }
+        else
+        {
+            // separate out the mime component
+            dataType = dataUri.slice( 5, p=dataUri.indexOf(',') );
+            dataUri = dataUri.slice( p+1 );
+            byteString = unescape( dataURI );
+        }
+        if ( null == mimeType ) mimeType = dataType;
+    }
+    else
+    {
+        byteString = dataURI;
+    }
+
+    // write the bytes of the string to a typed array
+    n = byteString.length;
+    arrayBuffer = new Uint8Array( n );
+    i0 = n & 15;
+    for (i=0; i<i0; i++)
+    {
+        arrayBuffer[ i ] = byteString.charCodeAt( i ) & 0xFF;
+    }
+    for (i=i0; i<n; i+=16)
+    {
+        // loop unrolling, ~ 16 x faster
+        j = i;
+        arrayBuffer[ j ] = byteString.charCodeAt( j++ ) & 0xFF;
+        arrayBuffer[ j ] = byteString.charCodeAt( j++ ) & 0xFF;
+        arrayBuffer[ j ] = byteString.charCodeAt( j++ ) & 0xFF;
+        arrayBuffer[ j ] = byteString.charCodeAt( j++ ) & 0xFF;
+        arrayBuffer[ j ] = byteString.charCodeAt( j++ ) & 0xFF;
+        arrayBuffer[ j ] = byteString.charCodeAt( j++ ) & 0xFF;
+        arrayBuffer[ j ] = byteString.charCodeAt( j++ ) & 0xFF;
+        arrayBuffer[ j ] = byteString.charCodeAt( j++ ) & 0xFF;
+        arrayBuffer[ j ] = byteString.charCodeAt( j++ ) & 0xFF;
+        arrayBuffer[ j ] = byteString.charCodeAt( j++ ) & 0xFF;
+        arrayBuffer[ j ] = byteString.charCodeAt( j++ ) & 0xFF;
+        arrayBuffer[ j ] = byteString.charCodeAt( j++ ) & 0xFF;
+        arrayBuffer[ j ] = byteString.charCodeAt( j++ ) & 0xFF;
+        arrayBuffer[ j ] = byteString.charCodeAt( j++ ) & 0xFF;
+        arrayBuffer[ j ] = byteString.charCodeAt( j++ ) & 0xFF;
+        arrayBuffer[ j ] = byteString.charCodeAt( j++ ) & 0xFF;
+    }
+    return new Blob( [arrayBuffer], {type:mimeType} );
+}
+
+function params2model( q, model, coerce, arrays_as_objects )
+{
+    model = model || {}; coerce = !!coerce;
+    arrays_as_objects = true === arrays_as_objects;
+    var coerce_types = { 'true':true, 'false':false, 'null':null, 'undefined':undefined }, 
+        params, p, key, value, o, k;
+
+    // Iterate over all name=value pairs.
+    params = q.replace(/%20|\+/g, ' ').split('&');
+    for (i=0,l=params.length; i<l; i++)
+    {
+        p = params[i].split( '=' );
+        // If key is more complex than 'foo', like 'a[]' or 'a[b][c]', split it
+        // into its component parts.
+        key = url_decode( p[0] );
+        value = p.length > 1 ? url_decode( p[1] ) : (coerce ? undefined : '');
+        // Coerce values.
+        if ( coerce )
+        {
+            value = value && !isNaN(value) && ((+value + '') === value)
+            ? +value                  // number
+            : ('undefined' === typeof value
+            ? undefined               // undefined
+            : (coerce_types[HAS][value]
+            ? coerce_types[value]     // true, false, null, undefined
+            : value));                // string
+        }
+        
+        var is_dynamic_array = dynamic_array_re.test( key );
+        key = dotted2( key ).split('.'); o = model;
+        while ( key.length )
+        {
+            k = key.shift( );
+            if ( key.length ) 
+            {
+                if ( !o[HAS]( k ) )
+                {
+                    if ( is_dynamic_array && 1 === key.length ) // dynamic array, ie a[ b ][ c ][ ]
+                        o[ k ] = [ ];
+                    else if ( !arrays_as_objects && numeric_re.test( key[0] ) ) // standard array, ie a[ b ][ c ][ n ]
+                        o[ k ] = new Array( parseInt(key[0], 10)+1 );
+                    else // object, associative array, ie a[ b ][ c ][ k ]
+                        o[ k ] = { };
+                }
+                else if ( !arrays_as_objects && numeric_re.test( key[0] ) && (o[k].length <= (n=parseInt(key[0], 10))) )
+                {
+                    // adjust size if needed to already standard array
+                    o[ k ] = o[ k ].concat( new Array(n-o[k].length+1) );
+                }
+                o = o[ k ];
+            }
+            else 
+            {
+                if ( is_dynamic_array ) o.push( value ); // dynamic array, i.e a[ b ][ c ][ ]
+                else o[ k ] = value; // i.e a[ b ][ c ][ k ]
+            }
+        }
+    }
+    return model;
+}
+
+function traverse( q, o, add, key )
+{
+    var k, i, l;
+
+    if ( !!key )
+    {
+        
+        if ( is_array( o ) )
+        {
+            if ( dynamic_array_re.test( key ) ) /* dynamic array */
+                for (i=0,l=o.length; i<l; i++)
+                    add( q, key, o[i] );
+            else
+                for (i=0,l=o.length; i<l; i++)
+                    traverse( q, o[i], add, key + '[' + ('object' === typeof o[i] ? i : '') + ']' );
+        }
+        else if ( o instanceof FileList )
+        {
+            for (i=0,l=o.length; i<l; i++)
+                add( q, key, o[i] );
+        }
+        else if ( o instanceof File || o instanceof Blob )
+        {
+                add( q, key, o );
+        }
+        else if ( o && ('object' === typeof o) )
+        {
+            for (k in o) if ( o[HAS](k) ) traverse( q, o[k], add, key + '[' + k + ']' );
+        }
+        else
+        {
+            add( q, key, o );
+        }
+    }
+    else if ( is_array( o ) )
+    {
+        for (i=0,l=o.length; i<l; i++) add( q, o[i].name, o[i].value );
+    }
+    else if ( o instanceof FileList )
+    {
+        for (i=0,l=o.length; i<l; i++) add( q, key, o[i] );
+    }
+    else if ( o instanceof File || o instanceof Blob )
+    {
+            add( q, key, o );
+    }
+    else if ( o && ('object' === typeof o) )
+    {
+        for (k in o) if ( o[HAS](k) ) traverse( q, o[k], add, k );
+    }
+    return q;
+}
+// adapted from https://github.com/knowledgecode/jquery-param
+function append_url( q, k, v )
+{
+    if ( 'function' === typeof v ) v = v( );
+    q.push( url_encode( k ) + '=' + url_encode( null == v ? '' : v ) );
+}
+function model2params( model, q, raw )
+{
+    var params = traverse( q || [], model || {}, append_url );
+    if ( true !== raw ) params = params.join('&').split('%20').join('+');
+    return params;
+}
+function append_fd( fd, k, v )
+{
+    if ( 'function' === typeof v ) v = v( );
+    if ( v instanceof FileList )
+    {
+        for (var i=0,l=v.length; i<l; i++)
+            fd.append( k, v[i], v[i].name );
+    }
+    else if ( v instanceof File )
+    {
+        fd.append( k, v, v.name );
+    }
+    else
+    {
+        fd.append( k, null == v ? '' : v );
+    }
+}
+function model2formdata( model, fd, formDataClass )
+{
+    if ( null == formDataClass && ('undefined' !== typeof FormData) ) formDataClass = FormData;
+    return formDataClass && model instanceof formDataClass ? model : traverse( fd || new formDataClass( ), model || {}, append_fd );
+}
+function model2json( model )
+{
+    return json_encode( model || {} );
 }
 
 // Custom Form View based on ModelView.View, implements custom form actions, can be overriden
@@ -490,41 +792,76 @@ ModelViewForm = window.ModelViewForm = function ModelViewForm( options ) {
     self.id = uuid('mvform');
     self.$options = $.extend({
         submit: true,
+        upload: false,
+        ajax: false,
         notify: true,
         model: false,
         livebind: false,
         prefixed: false,
         locale: { },
         Model: ModelViewForm.Model, 
-        View: ModelViewForm.View,
-        ajax: false
+        View: ModelViewForm.View
     }, options || { });
     self.initPubSub( );
 };
-ModelViewForm.VERSION = "0.9.0"; 
+ModelViewForm.VERSION = "1.0.0"; 
 ModelViewForm.Model = Model;
 ModelViewForm.View = View;
-ModelViewForm.doSubmit = function( submitMethod, responseType ) {
+ModelViewForm.doSubmit = function( submitMethod, responseType, andUpload ) {
     responseType = responseType || 'json';
-    return function( url, data, cb ) {
-        var handler = function( res, textStatus ) {
-                if ( 'success' == textStatus ) cb( true, res );
-                else cb( false, res );
+    if ( true === andUpload )
+    {
+        submitMethod = 'POST';
+        return function( url, data, cb ) {
+            var handler = function( res, textStatus ) {
+                    if ( 'success' == textStatus ) cb( true, res );
+                    else cb( false, res );
+            };
+            if ( !data instanceof window.FormData ) data = new window.FormData( data );
+            $.ajax({
+                type: submitMethod,
+                method: submitMethod,
+                dataType: responseType,
+                url: url,
+                data: data || null,
+                // to accept formData as ajax data
+                processData: false,
+                contentType: false,
+                success: handler, error: handler
+            });
         };
-        $.ajax({
-            type: submitMethod,
-            dataType: responseType,
-            url: url,
-            data: data || null,
-            success: handler, error: handler
-        });
-    };
+    }
+    else
+    {
+        return function( url, data, cb ) {
+            var handler = function( res, textStatus ) {
+                    if ( 'success' == textStatus ) cb( true, res );
+                    else cb( false, res );
+            };
+            var is_form_data = ('undefined' !== typeof window.FormData) && (data instanceof window.FormData);
+            $.ajax({
+                type: submitMethod,
+                method: submitMethod,
+                dataType: responseType,
+                url: url,
+                data: data || null,
+                // to accept formData as ajax data
+                processData: !is_form_data,
+                contentType: !is_form_data,
+                success: handler, error: handler
+            });
+        };
+    }
 };
 ModelViewForm.doGET = ModelViewForm.doSubmit( 'GET', 'json' );
 ModelViewForm.doPOST = ModelViewForm.doSubmit( 'POST', 'json' );
+ModelViewForm.doUpload = ModelViewForm.doSubmit( 'POST', 'json', true );
 ModelViewForm.getKey = key_getter;
 ModelViewForm.getValue = value_getter;
 ModelViewForm.toModel = fields2model;
+ModelViewForm.toJSON = model2json;
+ModelViewForm.toFormData = model2formdata;
+ModelViewForm.toUrlEncoded = model2params;
 
 ModelViewForm[PROTO] = ModelView.Extend( Extend( Object[PROTO] ), ModelView.PublishSubscribeInterface, {
     constructor: ModelViewForm,
@@ -643,7 +980,7 @@ ModelViewForm[PROTO] = ModelView.Extend( Extend( Object[PROTO] ), ModelView.Publ
             }
         ;
         
-        $form.addClass('mvform').attr('id', $form[0].id || uuid('mvform'));
+        $form.addClass( 'mvform' ).prop( 'disabled', false ).attr( 'id', $form[0].id || uuid('mvform') );
         
         self.trigger('before-render');
         
@@ -695,7 +1032,7 @@ ModelViewForm[PROTO] = ModelView.Extend( Extend( Object[PROTO] ), ModelView.Publ
                     
                     if ( request && !!options.ajax )
                     {
-                        ModelViewForm.doPOST(options.ajax, request, function( success, response ){
+                        ModelViewForm[!!option.upload?'doUpload':'doPOST'](options.ajax, request, function( success, response ){
                             
                             self.trigger('after-send', {success:success,response:response});
                         

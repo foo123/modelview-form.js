@@ -1,2 +1,3 @@
 # modelview-form.js
-declarative Form building, rendering, validation (based on modelview.js)
+
+declarative Form building, rendering, validation, localisation, (ajax) uploading (based on modelview.js)
