@@ -102,7 +102,12 @@ if ( !Validate[HAS]('FILESIZE') )
         max_size = parseInt( max_size, 10 ) || 0;
         return ModelView.Validation.Validator(function( fileList ) {
             fileList = fileList || input.files;
-            return (!fileList.length) || (fileList[0].size <= max_size);
+            var res = (!fileList.length) || (fileList[0].size <= max_size);
+            if ( !res )
+            {
+                input.value = ''; // clear input
+            }
+            return res;
         });
     };
 }
@@ -951,9 +956,17 @@ ModelViewForm[PROTO] = ModelView.Extend( Extend( Object[PROTO] ), ModelView.Publ
             self.$view.$model.notify( fields, 'error' );
             if ( self.$messages && self.$messages.length )
             {
-                self.$messages.hide( );
+                self.$messages.each(function( ){
+                    var $m = $(this);
+                    if ( !!$m.attr('ref') ) $($m.attr('ref')).removeClass('mvform-error');
+                    $m.hide( );
+                });
                 mverr = mvattr( 'error' ) + '="' + (self.$options.prefixed ? self.$view.$model.id + '.' : '');
-                $form.find( '[' + mverr + fields.join('"],['+mverr) + '"]' ).show( );
+                $form.find( '[' + mverr + fields.join('"],['+mverr) + '"]' ).each(function( ){
+                    var $m = $(this);
+                    if ( !!$m.attr('ref') ) $($m.attr('ref')).addClass('mvform-error');
+                    $m.show( );
+                });
             }
         }
         return self;
