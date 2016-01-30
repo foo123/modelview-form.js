@@ -1045,7 +1045,7 @@ ModelViewForm[PROTO] = ModelView.Extend( Extend( Object[PROTO] ), ModelView.Publ
                     
                     if ( request && !!options.ajax )
                     {
-                        ModelViewForm[!!option.upload?'doUpload':'doPOST'](options.ajax, request, function( success, response ){
+                        ModelViewForm[!!options.upload?'doUpload':'doPOST'](options.ajax, request, function( success, response ){
                             
                             self.trigger('after-send', {success:success,response:response});
                         
