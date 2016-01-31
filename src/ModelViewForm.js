@@ -783,11 +783,13 @@ View[PROTO].do_change = function( evt, el ) {
     var $el = $(el);
     if ( !el.validity.valid ) el.setCustomValidity("");
     if ( $el.hasClass('mvform-error') ) $el.removeClass('mvform-error');
+    if ( !!$el.attr( mvattr('proxy') ) ) $($el.attr( mvattr('proxy') )).removeClass('mvform-error');
 };
 View[PROTO].do_error = function( evt, el ) {
     var $el = $(el);
     if ( !el.validity.valid ) el.setCustomValidity("");
     if ( !$el.hasClass('mvform-error') ) $el.addClass('mvform-error');
+    if ( !!$el.attr( mvattr('proxy') ) ) $($el.attr( mvattr('proxy') )).addClass('mvform-error');
 };
 
 // The main ModelViewForm Class
@@ -810,6 +812,7 @@ ModelViewForm = window.ModelViewForm = function ModelViewForm( options ) {
     self.initPubSub( );
 };
 ModelViewForm.VERSION = "1.0.0"; 
+ModelViewForm.Attr = mvattr;
 ModelViewForm.Model = Model;
 ModelViewForm.View = View;
 ModelViewForm.doSubmit = function( submitMethod, responseType, andUpload ) {
@@ -956,17 +959,17 @@ ModelViewForm[PROTO] = ModelView.Extend( Extend( Object[PROTO] ), ModelView.Publ
             self.$view.$model.notify( fields, 'error' );
             if ( self.$messages && self.$messages.length )
             {
-                self.$messages.each(function( ){
+                self.$messages.hide( );/*.each(function( ){
                     var $m = $(this);
                     if ( !!$m.attr('ref') ) $($m.attr('ref')).removeClass('mvform-error');
                     $m.hide( );
-                });
+                });*/
                 mverr = mvattr( 'error' ) + '="' + (self.$options.prefixed ? self.$view.$model.id + '.' : '');
-                $form.find( '[' + mverr + fields.join('"],['+mverr) + '"]' ).each(function( ){
+                $form.find( '[' + mverr + fields.join('"],['+mverr) + '"]' ).show( );/*.each(function( ){
                     var $m = $(this);
                     if ( !!$m.attr('ref') ) $($m.attr('ref')).addClass('mvform-error');
                     $m.show( );
-                });
+                });*/
             }
         }
         return self;
