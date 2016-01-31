@@ -977,7 +977,7 @@ ModelViewForm[PROTO] = ModelView.Extend( Extend( Object[PROTO] ), ModelView.Publ
                     options = self.$options;
                 evt.preventDefault( );
                 evt.stopPropagation( );
-                self.$messages.hide( );
+                $form.find('['+mvattr( 'error' )+']').hide( );
                 
                 validation = self.validate( );
                 
