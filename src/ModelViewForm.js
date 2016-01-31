@@ -1,17 +1,16 @@
 /**
 *
 *   ModelViewForm.js
-*   Declarative MV Form building, rendering, validation 
-*   @dependencies: jQuery, DateX, ModelView
+*   Declarative MV Form building, rendering, localisation, validation 
+*   @dependencies: jQuery, ModelView, ModelViewValidation, Xpresion (optional, for custom field expressions)
 *   @version: 1.0.0
 *
 *   https://github.com/foo123/modelview.js
 *   https://github.com/foo123/modelview-form.js
 *
 **/
-!function( window, $, DateX, ModelView, Xpresion, undef ) {
+!function( window, $, ModelView, Xpresion, undef ) {
 "use strict";
-
 // auxilliaries
 var Extend = Object.create, PROTO = 'prototype', HAS = 'hasOwnProperty', 
     UPPER = 'toUpperCase', LOWER = 'toLowerCase', KEYS = Object.keys, toString = Object[PROTO].toString,
@@ -44,73 +43,6 @@ var Extend = Object.create, PROTO = 'prototype', HAS = 'hasOwnProperty',
     uuid = ModelView.UUID, Model = ModelView.Model, View, ModelViewForm
 ;
 
-
-if ( !Validate[HAS]('DATETIME') )
-{
-    Validate['DATETIME']  = function( format, locale ){
-        if ( 'function' === typeof DateX )
-        {
-            var date_parse = DateX.getParser( format, locale || DateX.defaultLocale );
-            return ModelView.Validation.Validator(function( datetime ) {
-                return !!datetime && false !== date_parse( datetime );
-            });
-        }
-        else
-        {
-            return ModelView.Validation.Validator(function( datetime ) {
-                return true;
-            });
-        }
-    };
-}
-
-if ( !Validate[HAS]('MIN_FILES') )
-{
-    Validate['MIN_FILES']  = function( input, m, item_filter ){
-        m = parseInt( m, 10 ) || 0;
-        return ModelView.Validation.Validator('function' === typeof item_filter 
-        ? function( fileList ) {
-            fileList = fileList || input.files;
-            return fileList.length > 0 ? (Array.prototype.filter.call(fileList, item_filter).length >= m) : (0 >= m);
-        }
-        : function( fileList ) {
-            fileList = fileList || input.files;
-            return fileList.length >= m;
-        });
-    };
-}
-
-if ( !Validate[HAS]('MAX_FILES') )
-{
-    Validate['MAX_FILES']  = function( input, M, item_filter ){
-        M = parseInt( M, 10 ) || 0;
-        return ModelView.Validation.Validator('function' === typeof item_filter 
-        ? function( fileList ) {
-            fileList = fileList || input.files;
-            return fileList.length > 0 ? (Array.prototype.filter.call(fileList, item_filter).length <= M) : (0 <= M);
-        }
-        : function( fileList ) {
-            fileList = fileList || input.files;
-            return fileList.length <= M;
-        });
-    };
-}
-
-if ( !Validate[HAS]('FILESIZE') )
-{
-    Validate['FILESIZE']  = function( input, max_size ){
-        max_size = parseInt( max_size, 10 ) || 0;
-        return ModelView.Validation.Validator(function( fileList ) {
-            fileList = fileList || input.files;
-            var res = (!fileList.length) || (fileList[0].size <= max_size);
-            if ( !res )
-            {
-                input.value = ''; // clear input
-            }
-            return res;
-        });
-    };
-}
 
 function mvattr( key )
 {
@@ -452,6 +384,14 @@ function fields2model( $elements, model, locale, $key, $value/*, $json_encoded*/
                             : Validate.FILESIZE(el, params)
                         ;
                     }
+                    else if ( 'FILETYPE' === validator || 'FILEMIMETYPE' === validator)
+                    {
+                        params = el[ATTR](mvattr( 'filetype' ));
+                        model.validators[ key ] = model.validators[HAS]( key )
+                            ? model.validators[ key ].AND( Validate.FILETYPE(el, params) )
+                            : Validate.FILETYPE(el, params)
+                        ;
+                    }
                     else if ( Validate[HAS](validator) )
                     {
                         model.validators[ key ] = model.validators[HAS]( key )
@@ -738,7 +678,14 @@ function traverse( q, o, add, key )
 function append_url( q, k, v )
 {
     if ( 'function' === typeof v ) v = v( );
-    q.push( url_encode( k ) + '=' + url_encode( null == v ? '' : v ) );
+    if ( (v instanceof FileList) || (v instanceof File) || (v instanceof Blob) )
+    {
+        /* skip */
+    }
+    else
+    {
+        q.push( url_encode( k ) + '=' + url_encode( null == v ? '' : v ) );
+    }
 }
 function model2params( model, q, raw )
 {
@@ -780,16 +727,16 @@ View = function View( ) {
 };
 View[PROTO] = Extend(ModelView.View[PROTO]);
 View[PROTO].do_change = function( evt, el ) {
-    var $el = $(el);
+    var $el = $(el), proxy_att = mvattr('proxy'), proxy = el[HAS_ATTR]( proxy_att ) && el[ATTR]( proxy_att );
     if ( !el.validity.valid ) el.setCustomValidity("");
     if ( $el.hasClass('mvform-error') ) $el.removeClass('mvform-error');
-    if ( !!$el.attr( mvattr('proxy') ) ) $($el.attr( mvattr('proxy') )).removeClass('mvform-error');
+    if ( !!proxy ) $(proxy).removeClass('mvform-error');
 };
 View[PROTO].do_error = function( evt, el ) {
-    var $el = $(el);
+    var $el = $(el), proxy_att = mvattr('proxy'), proxy = el[HAS_ATTR]( proxy_att ) && el[ATTR]( proxy_att );
     if ( !el.validity.valid ) el.setCustomValidity("");
     if ( !$el.hasClass('mvform-error') ) $el.addClass('mvform-error');
-    if ( !!$el.attr( mvattr('proxy') ) ) $($el.attr( mvattr('proxy') )).addClass('mvform-error');
+    if ( !!proxy ) $(proxy).addClass('mvform-error');
 };
 
 // The main ModelViewForm Class
@@ -812,7 +759,6 @@ ModelViewForm = window.ModelViewForm = function ModelViewForm( options ) {
     self.initPubSub( );
 };
 ModelViewForm.VERSION = "1.0.0"; 
-ModelViewForm.Attr = mvattr;
 ModelViewForm.Model = Model;
 ModelViewForm.View = View;
 ModelViewForm.doSubmit = function( submitMethod, responseType, andUpload ) {
@@ -864,6 +810,7 @@ ModelViewForm.doSubmit = function( submitMethod, responseType, andUpload ) {
 ModelViewForm.doGET = ModelViewForm.doSubmit( 'GET', 'json' );
 ModelViewForm.doPOST = ModelViewForm.doSubmit( 'POST', 'json' );
 ModelViewForm.doUpload = ModelViewForm.doSubmit( 'POST', 'json', true );
+ModelViewForm.Attr = mvattr;
 ModelViewForm.getKey = key_getter;
 ModelViewForm.getValue = value_getter;
 ModelViewForm.toModel = fields2model;
@@ -877,7 +824,6 @@ ModelViewForm[PROTO] = ModelView.Extend( Extend( Object[PROTO] ), ModelView.Publ
     id: null,
     $form: null,
     $view: null,
-    $messages: null,
     $options: null,
     
     dispose: function( ) {
@@ -891,7 +837,6 @@ ModelViewForm[PROTO] = ModelView.Extend( Extend( Object[PROTO] ), ModelView.Publ
         }
         self.$form = null;
         self.$view = null;
-        self.$messages = null;
         self.$options = null;
         self.id = null;
         return self;
@@ -953,18 +898,19 @@ ModelViewForm[PROTO] = ModelView.Extend( Extend( Object[PROTO] ), ModelView.Publ
     },
     
     notify: function( fields ) {
-        var self = this, $form = self.$form, mverr;
+        var self = this, $form = self.$form, mverror = mvattr( 'error' ), messages, mverr;
         if ( $form && $form.length && fields && fields.length )
         {
             self.$view.$model.notify( fields, 'error' );
-            if ( self.$messages && self.$messages.length )
+            messages = $form.find('[' + mverror + ']');
+            if ( messages.length )
             {
-                self.$messages.hide( );/*.each(function( ){
+                messages.hide( );/*.each(function( ){
                     var $m = $(this);
                     if ( !!$m.attr('ref') ) $($m.attr('ref')).removeClass('mvform-error');
                     $m.hide( );
                 });*/
-                mverr = mvattr( 'error' ) + '="' + (self.$options.prefixed ? self.$view.$model.id + '.' : '');
+                mverr = mverror + '="' + (self.$options.prefixed ? (self.$view.$model.id + '.') : '');
                 $form.find( '[' + mverr + fields.join('"],['+mverr) + '"]' ).show( );/*.each(function( ){
                     var $m = $(this);
                     if ( !!$m.attr('ref') ) $($m.attr('ref')).addClass('mvform-error');
@@ -1000,9 +946,7 @@ ModelViewForm[PROTO] = ModelView.Extend( Extend( Object[PROTO] ), ModelView.Publ
         
         self.trigger('before-render');
         
-        self.$messages = $form
-                        .find('['+mvattr( 'error' )+']')
-                        .hide( );
+        $form.find('['+mvattr( 'error' )+']').hide( );
         
         // parse fields and build model
         fields2model( $form.find('input,textarea,select'), dataModel, options.locale );
@@ -1048,11 +992,18 @@ ModelViewForm[PROTO] = ModelView.Extend( Extend( Object[PROTO] ), ModelView.Publ
                     
                     if ( request && !!options.ajax )
                     {
-                        ModelViewForm[!!options.upload?'doUpload':'doPOST'](options.ajax, request, function( success, response ){
+                        if ( !!options.upload )
+                            ModelViewForm.doUpload(options.ajax, ModelViewForm.toFormData(request), function( success, response ){
+                                
+                                self.trigger('after-send', {success:success,response:response});
                             
-                            self.trigger('after-send', {success:success,response:response});
-                        
-                        });
+                            });
+                        else
+                            ModelViewForm.doPOST(options.ajax, request, function( success, response ){
+                                
+                                self.trigger('after-send', {success:success,response:response});
+                            
+                            });
                     }
                 }
                 else
@@ -1068,5 +1019,4 @@ ModelViewForm[PROTO] = ModelView.Extend( Extend( Object[PROTO] ), ModelView.Publ
         return self;
     }
 });
-
-}(window, jQuery, DateX, ModelView, null);
+}(window, jQuery, ModelView, 'undefined' !== typeof Xpresion ? Xpresion : null);
