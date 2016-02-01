@@ -772,7 +772,7 @@ ModelViewForm.doSubmit = function( submitMethod, responseType, andUpload ) {
                     else cb( false, res );
             };
             if ( !data instanceof window.FormData ) data = new window.FormData( data );
-            $.ajax({
+            var ajaxOpts = {
                 type: submitMethod,
                 method: submitMethod,
                 dataType: responseType,
@@ -782,7 +782,8 @@ ModelViewForm.doSubmit = function( submitMethod, responseType, andUpload ) {
                 processData: false,
                 contentType: false,
                 success: handler, error: handler
-            });
+            };
+            $.ajax( ajaxOpts );
         };
     }
     else
@@ -792,18 +793,21 @@ ModelViewForm.doSubmit = function( submitMethod, responseType, andUpload ) {
                     if ( 'success' == textStatus ) cb( true, res );
                     else cb( false, res );
             };
-            var is_form_data = ('undefined' !== typeof window.FormData) && (data instanceof window.FormData);
-            $.ajax({
+            var ajaxOpts = {
                 type: submitMethod,
                 method: submitMethod,
                 dataType: responseType,
                 url: url,
                 data: data || null,
-                // to accept formData as ajax data
-                processData: !is_form_data,
-                contentType: !is_form_data,
                 success: handler, error: handler
-            });
+            };
+            if ( ('undefined' !== typeof window.FormData) && (data instanceof window.FormData) )
+            {
+                // to accept formData as ajax data
+                ajaxOpts.processData = false;
+                ajaxOpts.contentType = false;
+            }
+            $.ajax( ajaxOpts );
         };
     }
 };
