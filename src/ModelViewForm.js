@@ -979,6 +979,9 @@ ModelViewForm[PROTO] = ModelView.Extend( Extend( Object[PROTO] ), ModelView.Publ
             $form.on('submit.'+self.id, function( evt ){
                 var validation, request, 
                     options = self.$options;
+                
+                if ( true === options.disabled ) return;
+                
                 evt.preventDefault( );
                 evt.stopPropagation( );
                 $form.find('['+mvattr( 'error' )+']').hide( );
