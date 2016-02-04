@@ -197,7 +197,7 @@ function value_getter( at_value, strict )
         ? at_value
         : (false !== strict
         ? function( el ) {
-            var value_alt = el[HAS_ATTR]('data-alternative-value') ? el[ATTR]('data-alternative-value') : null,
+            var value_alt = el[HAS_ATTR]('data-alt-value') ? el[ATTR]('data-alt-value') : null,
                 value = ('value' === at_value ? ((!!value_alt) && (null!=el[value_alt]) ? el[value_alt] : $(el).val()) : el[ATTR]( at_value )) || '',
                 type = (el[ATTR]('type')||el.tagName||'').toLowerCase( );
             
@@ -217,7 +217,7 @@ function value_getter( at_value, strict )
             }
         }
         : function( el ) {
-            var value_alt = el[HAS_ATTR]('data-alternative-value') ? el[ATTR]('data-alternative-value') : null,
+            var value_alt = el[HAS_ATTR]('data-alt-value') ? el[ATTR]('data-alt-value') : null,
                 value = ('value' === at_value ? ((!!value_alt) && (null!=el[value_alt]) ? el[value_alt] : $(el).val()) : el[ATTR]( at_value )) || '',
                 type = (el[ATTR]('type')||el.tagName).toLowerCase( );
             // empty, non-selected, non-checked element, bypass
