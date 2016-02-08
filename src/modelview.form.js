@@ -504,11 +504,11 @@ function fields2model( $elements, model, locale, $key, $value/*, $json_encoded*/
     }
 }
 
-function datauri2blob( dataURI, mimeType )
+function datauri2blob( dataUri, mimeType )
 {
     // convert base64/URLEncoded data component to raw binary data held in a string
     var byteString, arrayBuffer, dataType, i, i0, n, j, p;
-    if ( 'data:' === dataURI.substr( 0, 5 ) )
+    if ( 'data:' === dataUri.substr( 0, 5 ) )
     {
         if ( -1 < (p=dataUri.indexOf(';base64,')) )
         {
@@ -522,13 +522,13 @@ function datauri2blob( dataURI, mimeType )
             // separate out the mime component
             dataType = dataUri.slice( 5, p=dataUri.indexOf(',') );
             dataUri = dataUri.slice( p+1 );
-            byteString = unescape( dataURI );
+            byteString = unescape( dataUri );
         }
         if ( null == mimeType ) mimeType = dataType;
     }
     else
     {
-        byteString = dataURI;
+        byteString = dataUri;
     }
 
     // write the bytes of the string to a typed array
@@ -819,6 +819,7 @@ ModelViewForm.doUpload = ModelViewForm.doSubmit( 'POST', 'json', true );
 ModelViewForm.Attr = mvattr;
 ModelViewForm.getKey = key_getter;
 ModelViewForm.getValue = value_getter;
+ModelViewForm.toBlob = datauri2blob;
 ModelViewForm.toModel = fields2model;
 ModelViewForm.toJSON = model2json;
 ModelViewForm.toFormData = model2formdata;
