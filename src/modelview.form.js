@@ -382,16 +382,16 @@ function fields2model( $elements, model, locale, $key, $value/*, $json_encoded*/
                     {
                         params = parseInt(el[ATTR](mvattr( 'filesize' )), 10) || 1048576 /*1 MiB*/;
                         model.validators[ key ] = model.validators[HAS]( key )
-                            ? model.validators[ key ].AND( Validate.FILESIZE(el, params) )
-                            : Validate.FILESIZE(el, params)
+                            ? model.validators[ key ].AND( Validate.FILESIZE(params) )
+                            : Validate.FILESIZE(params)
                         ;
                     }
                     else if ( 'FILETYPE' === validator || 'FILEMIMETYPE' === validator)
                     {
                         params = el[ATTR](mvattr( 'filetype' ));
                         model.validators[ key ] = model.validators[HAS]( key )
-                            ? model.validators[ key ].AND( Validate.FILETYPE(el, params) )
-                            : Validate.FILETYPE(el, params)
+                            ? model.validators[ key ].AND( Validate.FILETYPE(params) )
+                            : Validate.FILETYPE(params)
                         ;
                     }
                     else if ( Validate[HAS](validator) )
@@ -432,10 +432,10 @@ function fields2model( $elements, model, locale, $key, $value/*, $json_encoded*/
         {
             required_validator = is_dynamic_array 
                 ? (file_type
-                ? Validate.MIN_FILES( el, parseInt(el[ATTR](mvattr( 'leastrequired' )), 10) || 1 )
+                ? Validate.MIN_FILES( parseInt(el[ATTR](mvattr( 'leastrequired' )), 10) || 1 )
                 : Validate.MIN_ITEMS( parseInt(el[ATTR](mvattr( 'leastrequired' )), 10) || 1, item_not_empty ))
                 : (file_type
-                ? Validate.MIN_FILES( el, 1 )
+                ? Validate.MIN_FILES( 1 )
                 : Validate.NOT_EMPTY)
             ;
                 
