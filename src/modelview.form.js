@@ -43,6 +43,35 @@ var Extend = Object.create, PROTO = 'prototype', HAS = 'hasOwnProperty',
     uuid = ModelView.UUID, Model = ModelView.Model, View, ModelViewForm
 ;
 
+function dispatch( event, element, data, native )
+{
+    var evt; // The custom event that will be created
+    if ( false === native )
+    {
+        evt = $.Event( event );
+        if ( null != data ) evt.data = data;
+        $(element).trigger( evt );
+    }
+    else
+    {
+        if ( document.createEvent )
+        {
+            evt = document.createEvent( "HTMLEvents" );
+            evt.initEvent( event, true, true );
+            evt.eventName = event;
+            if ( null != data ) evt.data = data;
+            element.dispatchEvent( evt );
+        }
+        else
+        {
+            evt = document.createEventObject( );
+            evt.eventType = event;
+            evt.eventName = event;
+            if ( null != data ) evt.data = data;
+            element.fireEvent( "on" + evt.eventType, evt );
+        }
+    }
+}
 
 function mvattr( key )
 {
@@ -159,9 +188,7 @@ function ajax_dependent_select( $selects, mvform )
                 select.$el.addClass('mvform-progress');
                 mvform.trigger( 'before-ajax-options', select );
                 ModelViewForm.doGET(select.options, request, function( success, response ){
-                    update_options( select.$el, response || [] )
-                        .removeClass('mvform-progress')
-                        .trigger('change');
+                    dispatch( 'change', update_options( select.$el, response || [] ).removeClass('mvform-progress')[0] );
                     mvform.trigger( 'after-ajax-options', select );
                 });
             }
