@@ -40,38 +40,9 @@ var Extend = Object.create, PROTO = 'prototype', HAS = 'hasOwnProperty',
     esc_re = function( s ) { return s.replace(escaped_re, "\\$&"); },
     RE = function( re, fl ) { return new RegExp(re, fl||''); },
     TypeCast = ModelView.Type.Cast, Validate = ModelView.Validation.Validate,
+    dispatchEvent = ModelView.Event.Dispatch,
     uuid = ModelView.UUID, Model = ModelView.Model, View, ModelViewForm
 ;
-
-function dispatch( event, element, data, native )
-{
-    var evt; // The custom event that will be created
-    if ( false === native )
-    {
-        evt = $.Event( event );
-        if ( null != data ) evt.data = data;
-        $(element).trigger( evt );
-    }
-    else
-    {
-        if ( document.createEvent )
-        {
-            evt = document.createEvent( "HTMLEvents" );
-            evt.initEvent( event, true, true );
-            evt.eventName = event;
-            if ( null != data ) evt.data = data;
-            element.dispatchEvent( evt );
-        }
-        else
-        {
-            evt = document.createEventObject( );
-            evt.eventType = event;
-            evt.eventName = event;
-            if ( null != data ) evt.data = data;
-            element.fireEvent( "on" + evt.eventType, evt );
-        }
-    }
-}
 
 function mvattr( key )
 {
@@ -188,7 +159,7 @@ function ajax_dependent_select( $selects, mvform )
                 select.$el.addClass('mvform-progress');
                 mvform.trigger( 'before-ajax-options', select );
                 ModelViewForm.doGET(select.options, request, function( success, response ){
-                    dispatch( 'change', update_options( select.$el, response || [] ).removeClass('mvform-progress')[0] );
+                    dispatchEvent( 'change', update_options( select.$el, response || [] ).removeClass('mvform-progress')[0] );
                     mvform.trigger( 'after-ajax-options', select );
                 });
             }
@@ -939,17 +910,9 @@ ModelViewForm[PROTO] = ModelView.Extend( Extend( Object[PROTO] ), ModelView.Publ
             messages = $form.find('[' + mverror + ']');
             if ( messages.length )
             {
-                messages.hide( );/*.each(function( ){
-                    var $m = $(this);
-                    if ( !!$m.attr('ref') ) $($m.attr('ref')).removeClass('mvform-error');
-                    $m.hide( );
-                });*/
+                messages.hide( );
                 mverr = mverror + '="' + (self.$options.prefixed ? (self.$view.$model.id + '.') : '');
-                $form.find( '[' + mverr + fields.join('"],['+mverr) + '"]' ).show( );/*.each(function( ){
-                    var $m = $(this);
-                    if ( !!$m.attr('ref') ) $($m.attr('ref')).addClass('mvform-error');
-                    $m.show( );
-                });*/
+                $form.find( '[' + mverr + fields.join('"],['+mverr) + '"]' ).show( );
             }
         }
         return self;
