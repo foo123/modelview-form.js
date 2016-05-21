@@ -3,7 +3,7 @@
 *   ModelViewForm.js
 *   Declarative MV Form building, rendering, localisation, validation 
 *   @dependencies: jQuery, ModelView, ModelViewValidation, Xpresion (optional, for custom field expressions)
-*   @version: 1.0.0
+*   @version: 1.0.1
 *
 *   https://github.com/foo123/modelview.js
 *   https://github.com/foo123/modelview-form.js
@@ -115,12 +115,13 @@ function update_options( $select, opts )
     return $select;
 }
 
-function ajax_dependent_select( $selects, mvform )
+function ajax_dependent_controls( $selects, mvform )
 {
     var model = mvform.$view.$model, 
         model_prefix = model.id + '.', 
         selects_exist = false, 
-        dependent_selects = { };
+        dependent_selects = { },
+        do_init = false;
         
     $selects.each(function( ){
         var $select = $(this), name = $select.attr('name'), key,
@@ -143,7 +144,8 @@ function ajax_dependent_select( $selects, mvform )
             key: ajax_key,
             model_key: ajax_model_key,
             options: ajax_options,
-            $el: $select
+            $el: $select,
+            _inited: 0
         };
         selects_exist = true;
     });
@@ -161,11 +163,33 @@ function ajax_dependent_select( $selects, mvform )
                 ModelViewForm.doGET(select.options, request, function( success, response ){
                     dispatchEvent( 'change', update_options( select.$el, response || [] ).removeClass('mvform-progress')[0] );
                     mvform.trigger( 'after-ajax-options', select );
+                    if ( true === do_init )
+                    {
+                        select._inited = 1;
+                        var k, num_inited = 0, num_controls = 0;
+                        for(var k in dependent_selects)
+                        {
+                            if ( !dependent_selects[HAS](k) ) continue;
+                            num_controls++;
+                            if ( dependent_selects[k]._inited ) num_inited++;
+                        }
+                        if ( (0 < num_controls) && (num_controls === num_inited) )
+                        {
+                            do_init = false;
+                            mvform.trigger( 'inited' );
+                        }
+                    }
                 });
             }
         });
         // trigger updates first time
+        do_init = true;
         model.notify( KEYS(dependent_selects), 'change' );
+        return false;
+    }
+    else
+    {
+        return true;
     }
 }
 
@@ -758,7 +782,7 @@ ModelViewForm = window.ModelViewForm = function ModelViewForm( options ) {
     }, options || { });
     self.initPubSub( );
 };
-ModelViewForm.VERSION = "1.0.0"; 
+ModelViewForm.VERSION = "1.0.1"; 
 ModelViewForm.Model = Model;
 ModelViewForm.View = View;
 ModelViewForm.doSubmit = function( submitMethod, responseType, andUpload ) {
@@ -936,7 +960,8 @@ ModelViewForm[PROTO] = ModelView.Extend( Extend( Object[PROTO] ), ModelView.Publ
                 getters: { }, 
                 setters: { },
                 dependencies: { }
-            }
+            },
+            immediate_init = true
         ;
         
         $form.addClass( 'mvform' ).prop( 'disabled', false ).attr( 'id', $form[0].id || uuid('mvform') );
@@ -962,9 +987,6 @@ ModelViewForm[PROTO] = ModelView.Extend( Extend( Object[PROTO] ), ModelView.Publ
             viewClass: viewClass
         });
         self.$view = $form.modelview('view');
-        
-        //ajax_suggest( $form.find('input['+mvattr( 'ajax-suggest' )+']'), self );
-        ajax_dependent_select( $form.find('select['+mvattr( 'ajax-options' )+']'), self );
         
         if ( options.submit )
         {
@@ -1015,6 +1037,10 @@ ModelViewForm[PROTO] = ModelView.Extend( Extend( Object[PROTO] ), ModelView.Publ
         }
         
         self.trigger('after-render');
+        
+        //ajax_suggest( $form.find('input['+mvattr( 'ajax-suggest' )+']'), self );
+        immediate_init = ajax_dependent_controls( $form.find('select['+mvattr( 'ajax-options' )+']'), self );
+        if ( immediate_init ) self.trigger('inited');
         
         return self;
     }
