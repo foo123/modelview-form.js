@@ -3,7 +3,7 @@
 *   ModelViewForm.js
 *   Declarative MV Form building, rendering, localisation, validation 
 *   @dependencies: jQuery, ModelView, ModelViewValidation, Xpresion (optional, for custom field expressions)
-*   @version: 1.0.1
+*   @version: 1.0.2
 *
 *   https://github.com/foo123/modelview.js
 *   https://github.com/foo123/modelview-form.js
@@ -282,7 +282,7 @@ function fields2model( $elements, model, locale, $key, $value/*, $json_encoded*/
         value = $value( el );
         if ( null == value )
         {
-            if ( file_type || (!is_dynamic_array && 'checkbox' === input_type && !el.checked && has_alternative) )
+            if ( file_type || is_dynamic_array || (/*!is_dynamic_array &&*/ 'checkbox' === input_type && !el.checked && has_alternative) )
             {
                 // pass
                 value = null;
@@ -519,8 +519,8 @@ function fields2model( $elements, model, locale, $key, $value/*, $json_encoded*/
             }
             else 
             {
-                if ( is_dynamic_array ) o.push( val ); // dynamic array, i.e a[ b ][ c ][ ]
-                else o[ i ] = !is_dynamic_array && 'checkbox' === input_type && !el.checked && has_alternative ? nval : val; // i.e a[ b ][ c ][ k ]
+                if ( is_dynamic_array ) { if ( null!= val ) o.push( val ); } // dynamic array, i.e a[ b ][ c ][ ]
+                else o[ i ] = !is_dynamic_array && ('checkbox' === input_type) && !el.checked && has_alternative ? nval : val; // i.e a[ b ][ c ][ k ]
             }
         }
     }
@@ -782,7 +782,7 @@ ModelViewForm = window.ModelViewForm = function ModelViewForm( options ) {
     }, options || { });
     self.initPubSub( );
 };
-ModelViewForm.VERSION = "1.0.1"; 
+ModelViewForm.VERSION = "1.0.2"; 
 ModelViewForm.Model = Model;
 ModelViewForm.View = View;
 ModelViewForm.doSubmit = function( submitMethod, responseType, andUpload ) {
